@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# virtualenv
+venv/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+
+# system
+*.log
+
+# dotenv
+.env
+
+# models and data
+models/
+data/
+
+# OS files
+Thumbs.db
+Desktop.ini

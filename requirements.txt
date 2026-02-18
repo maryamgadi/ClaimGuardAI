@@ -1,0 +1,11 @@
+easyocr             
+opencv-python      
+pdf2image           
+Pillow
+langchain           
+langchain-ollama    
+langchain-openai   
+requests
+pandas              
+numpy
+python-dotenv
