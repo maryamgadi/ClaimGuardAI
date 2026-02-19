@@ -1,5 +1,4 @@
-
-import os
+﻿import os
 import uuid
 from fastapi import FastAPI, UploadFile, File, HTTPException
 
@@ -10,6 +9,9 @@ from claimguard.main import validate_case
 
 def create_app() -> FastAPI:
     app = FastAPI(title="ClaimGuardAI-clean")
+    @app.get("/")
+    def root():
+        return {"status": "ok", "message": "Go to /docs to test"}
 
     os.makedirs(TMP_DIR, exist_ok=True)
 
@@ -19,9 +21,7 @@ def create_app() -> FastAPI:
         if ext not in [".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"]:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
 
-        name = f"{uuid.uuid4()}_{filename}"
-        path = os.path.join(TMP_DIR, name)
-
+        path = os.path.join(TMP_DIR, f"{uuid.uuid4()}{ext}")
         data = await upload.read()
         with open(path, "wb") as f:
             f.write(data)
@@ -42,7 +42,6 @@ def create_app() -> FastAPI:
             DocumentInput(doc_type="facture", path=fa_path),
             DocumentInput(doc_type="ordonnance", path=or_path),
         ]
-
         result = validate_case(docs)
         return result.model_dump()
 
@@ -50,4 +49,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

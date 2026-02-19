@@ -25,7 +25,7 @@ def extract_text(file_path: str) -> str:
     elif ext == ".pdf":
         pages = convert_from_path(file_path)
         for page in pages:
-            result = reader.readtext(page, detail=0)
+            result = reader.readtext(np.array(page), detail=0)
             text += "\n".join(result) + "\n"
     else:
         raise ValueError(f"Type de fichier non supporté: {ext}")
