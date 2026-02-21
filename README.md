@@ -52,5 +52,47 @@ Chaque sous-module contiendra des classes et fonctions dédiées :
 2. Ajouter des tests unitaires simples dans `tests/`.
 3. Configurer la journalisation dans `logs/`.
 4. Documenter les règles et la structure des données dans `configs/`.
+> **Note** : pour traiter des PDF, `pdf2image` nécessite les utilitaires
+> Poppler (`pdftoppm`, `pdfinfo`). Sur Windows téléchargez un binaire et soit
+> ajoutez le dossier `bin` de Poppler à votre `PATH`, soit définissez
+> `POPPLER_PATH` vers ce dossier avant de démarrer le serveur (p. ex.
+> `setx POPPLER_PATH C:\poppler\bin`).
+### Validation de dossiers
+
+Le module `claimguard.validation` fournit deux points d'entrée :
+
+* `validate_document(file_path)` traite un seul fichier (image ou PDF) et
+  renvoie les entités extraites, les anomalies détectées et un score.
+* `validate_claim(ordonnance, facture, feuille)` prend en charge un dossier
+  complet composé d'une ordonnance, d'une facture et d'une feuille de soin.
+  Chaque document est analysé séparément puis un **cross‑checking** est
+  effectué (vérification des numéros de sécurité sociale, etc.).
+  Le résultat inclut les anomalies spécifiques à chaque document ainsi que
+  celles issues du croisement.
+
+L'API FastAPI expose désormais deux routes :
+
+```python
+@app.post("/validate")          # valide un seul fichier
+@app.post("/validate-claim")    # reçoit les trois fichiers et effectue
+                                # l'extraction + cross‑checking
+```
+
+### Exécuter manuellement sur des fichiers locaux
+
+Pour tester avec vos propres documents sans passer par l'API, un petit
+outil en ligne de commande est fourni :
+
+```bash
+# depuis la racine du projet (environnement activé)
+python -m claimguard.cli ./ordonnance.pdf ./facture.pdf ./feuille.pdf
+```
+
+L'application renvoie un JSON contenant les entités pour chaque document,
+les anomalies détectées, le score de cohérence, et la `decision` finale
+("validé_et_remboursé" ou "rejeté").
+
+> Vous pouvez naturellement appeler `validate_claim()` depuis n'importe
+> quel script Python avec des chemins vers vos propres fichiers.
 
 > L'architecture reste évolutive : vous pouvez rajouter un module `ml/` si vous entraînez un modèle, ou `data/` pour stocker des exemples.
