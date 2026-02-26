@@ -7,6 +7,8 @@ __pycache__/
 # virtualenv
 venv/
 .venv/
+# custom python env created for project
+ocrenv/
 
 # IDEs
 .vscode/
@@ -21,6 +23,8 @@ venv/
 # models and data
 models/
 data/
+# ignore generated/large packages
+ocrenv/
 
 # OS files
 Thumbs.db
