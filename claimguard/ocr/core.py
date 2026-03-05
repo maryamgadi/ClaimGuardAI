@@ -14,7 +14,7 @@ except Exception:
     fitz = None
 
 from paddleocr import PaddleOCR
-
+from . import cnss_zones # Assumes this is in your package
 
 # ---------------------------
 # OCR engine (singleton)
@@ -179,17 +179,16 @@ def _join_lines(lines: List[str]) -> str:
     return "\n".join(out).strip()
 
 
-def extract_text(path: str, drop_score: float = 0.55) -> str:
-    """
-    Pipeline OCR complet:
-    - charge doc (PDF ou image)
-    - preprocess
-    - OCR (filtré par score)
-    - texte final multi-lignes
-    """
+def extract_text(path: str, doc_type: str = "generic", drop_score: float = 0.55) -> str:
     img = load_document_as_bgr(path)
-    gray = preprocess_bgr(img)
 
+    # NEW: Route to specialized template logic
+    if doc_type == "feuille_cnss":
+        # cnss_zones returns a dictionary of extracted fields
+        return cnss_zones.extract_cnss_fields(img)
+
+    # FALLBACK: Original logic
+    gray = preprocess_bgr(img)
     items = _run_ocr_lines(gray, drop_score=drop_score)
     texts = [t for (t, s, y) in items]
     return _join_lines(texts)
