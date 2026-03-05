@@ -14,7 +14,16 @@ def main():
     parser.add_argument("ordonnance", help="chemin vers l'ordonnance (image/pdf)")
     parser.add_argument("facture", help="chemin vers la facture (image/pdf)")
     parser.add_argument("feuille", help="chemin vers la feuille de soin (image/pdf)")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="active le mode debug (imprime les étapes intermédiaires)",
+    )
     args = parser.parse_args()
+
+    if args.debug:
+        import claimguard.config as _cfg
+        _cfg.DEBUG = True
 
     try:
         result = validate_claim(args.ordonnance, args.facture, args.feuille)

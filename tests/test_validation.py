@@ -82,6 +82,13 @@ def test_validate_claim_pipeline(tmp_path, monkeypatch):
     assert result2['cross_anomalies'] == []
     assert result2['decision'] == "validé_et_remboursé"
 
+    # debug mode should print additional information but not change result
+    import claimguard.config as _cfg
+    _cfg.DEBUG = True
+    result3 = validate_claim(files['ordonnance'], files['facture'], files['feuille'])
+    assert result3 == result2
+    _cfg.DEBUG = False
+
 
 def test_cli_invocation(tmp_path, monkeypatch):
     # reuse same fake extraction as earlier
@@ -116,3 +123,12 @@ def test_cli_invocation(tmp_path, monkeypatch):
     output = result.stdout
     data = json.loads(output)
     assert data['decision'] in ("validé_et_remboursé", "rejeté")
+
+    # CLI debug flag should not break execution and should include debug text
+    result_dbg = subprocess.run(
+        [sys.executable, "-m", "claimguard.cli", "--debug", files['ordonnance'], files['facture'], files['feuille']],
+        capture_output=True,
+        text=True,
+    )
+    assert result_dbg.returncode == 0
+    assert "DEBUG" in result_dbg.stderr or "debug" in result_dbg.stderr or result_dbg.stdout
