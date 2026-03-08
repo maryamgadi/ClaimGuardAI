@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
+from claimguard.validation import clean_ocr_name
 
 # =========================
 # Regex (base)
@@ -461,15 +462,87 @@ def extract_fields(cleaned: str, doc_type: Optional[str] = None) -> Dict[str, An
     return fields
 
 
+import re
+from typing import Any, Dict, List, Optional
+
+
+def clean_ocr_name(name: str) -> str:
+    """
+    Nettoie les bruits OCR spécifiques aux noms (ex: 1 -> I, 0 -> O)
+    et standardise en MAJUSCULES pour faciliter le cross-check.
+    """
+    if not name:
+        return ""
+    # Corrige les confusions classiques de PaddleOCR/EasyOCR
+    name = name.replace("1", "I").replace("0", "O").replace("5", "S").replace("8", "B")
+    # Supprime les caractères spéciaux et chiffres restants
+    name = re.sub(r"[^A-ZÀ-ÿ\s\-]", "", name, flags=re.I)
+    # Nettoie les espaces multiples
+    name = re.sub(r"\s+", " ", name).strip()
+    return name.upper()
+
+
+def _extract_patient_fuzzy(text: str) -> Optional[str]:
+    """
+    Capture le nom du patient même si 'Patient' est mal lu (Pahienk, Patie, etc.)
+    """
+    # Regex flexible pour "Patient", "Pahienk", "Client", "Assuré"
+    pattern = re.compile(r"(?:Pati[enkt]{1,3}|Client|Assuré)\s*[:\-\s]\s*(.*)", re.I)
+
+    for line in text.split('\n'):
+        match = pattern.search(line)
+        if match:
+            return clean_ocr_name(match.group(1))
+    return None
+
+
+import re
+from typing import Any, Dict, List, Optional
+
+
+def clean_ocr_name(name: str) -> str:
+    """Cleans OCR noise (1->I, 0->O, etc.) and standardizes to UPPERCASE."""
+    if not name:
+        return ""
+    # Fix common character swaps
+    name = name.replace("1", "I").replace("0", "O").replace("5", "S").replace("8", "B")
+    # Remove digits and special chars, keep accents and hyphens
+    name = re.sub(r"[^A-ZÀ-ÿ\s\-]", "", name, flags=re.I)
+    # Remove extra whitespace
+    name = re.sub(r"\s+", " ", name).strip()
+    return name.upper()
+
+
+# claimguard/nlp/pipeline.py
+
+def _extract_patient_fuzzy(text: str) -> Optional[str]:
+    # Added 'h' to catch 'Pahienk' and 'v'/'m' variations
+    pattern = re.compile(r"(?:Pa[htienktvh]{1,4}|Client|Assuré)\s*[:\-\s]\s*(.*)", re.I)
+    for line in text.split('\n'):
+        match = pattern.search(line)
+        if match:
+            return clean_ocr_name(match.group(1))
+    return None
+
 def extract_entities(text: str, doc_type: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Pipeline stable:
-    raw -> normalize_ocr_text -> clean_text -> extract_fields
-    """
     raw = text or ""
+    # Use your existing cleaning functions
     normalized = normalize_ocr_text(raw)
     cleaned = clean_text(normalized)
+
+    # Get existing fields from your regex engine
     fields = extract_fields(cleaned, doc_type=doc_type)
+
+    # FIX: Explicitly check for patient_name in invoices/prescriptions
+    if not fields.get("patient_name"):
+        fuzzy_name = _extract_patient_fuzzy(cleaned)
+        if fuzzy_name:
+            fields["patient_name"] = fuzzy_name
+
+    # Systematic cleaning for cross-check compatibility
+    for name_field in ["patient_name", "beneficiary_name", "doctor_name"]:
+        if fields.get(name_field):
+            fields[name_field] = clean_ocr_name(fields[name_field])
 
     return {
         "doc_type": doc_type,

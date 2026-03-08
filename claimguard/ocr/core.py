@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 
 import numpy as np
 import cv2
@@ -179,16 +179,21 @@ def _join_lines(lines: List[str]) -> str:
     return "\n".join(out).strip()
 
 
-def extract_text(path: str, doc_type: str = "generic", drop_score: float = 0.55) -> str:
+# claimguard/ocr/core.py
+
+# claimguard/ocr/core.py
+
+def extract_text(path: str, doc_type: str = "generic", drop_score: float = 0.55) -> Any:
     img = load_document_as_bgr(path)
 
-    # NEW: Route to specialized template logic
     if doc_type == "feuille_cnss":
-        # cnss_zones returns a dictionary of extracted fields
-        return cnss_zones.extract_cnss_fields(img)
+        # Return a dictionary that explicitly tells server.py: "No raw text, use fields"
+        return {
+            "is_structured": True,
+            "fields": cnss_zones.extract_cnss_fields_from_image(img, _ocr_fr())
+        }
 
-    # FALLBACK: Original logic
+    # Standard path for others
     gray = preprocess_bgr(img)
     items = _run_ocr_lines(gray, drop_score=drop_score)
-    texts = [t for (t, s, y) in items]
-    return _join_lines(texts)
+    return _join_lines([t for (t, s, y) in items])

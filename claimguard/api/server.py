@@ -125,9 +125,9 @@ def create_app() -> FastAPI:
     # ---------- debug OCR (3 docs) ----------
     @app.post("/debug/claim-ocr")
     async def debug_claim_ocr(
-        ordonnance: UploadFile = File(...),
-        facture: UploadFile = File(...),
-        feuille: UploadFile = File(...),
+            ordonnance: UploadFile = File(...),
+            facture: UploadFile = File(...),
+            feuille: UploadFile = File(...),
     ):
         o_path = f_path = s_path = None
         try:
@@ -135,52 +135,53 @@ def create_app() -> FastAPI:
             f_path = await _save_upload_to_tmp(facture)
             s_path = await _save_upload_to_tmp(feuille)
 
-            t_o = extract_text(o_path) or ""
-            t_f = extract_text(f_path) or ""
-            t_s = extract_text(s_path) or ""
+            # 1. Unified extraction
+            # We pass doc_type so core.py can handle CNSS as structured fields
+            res_o = extract_text(o_path, doc_type="ordonnance")
+            res_f = extract_text(f_path, doc_type="facture")
+            res_s = extract_text(s_path, doc_type="feuille_cnss")
 
-            e_o = extract_entities(t_o, "ordonnance")
-            e_f = extract_entities(t_f, "facture")
-            e_s = extract_entities(t_s, "feuille")
-            # =======================================================
-            # 3. --- NOUVEAU : CALCUL DES ANOMALIES ET VERDICT ---
-            # =======================================================
-            # On applique les règles pour trouver les erreurs de chaque doc
+            # 2. Process results (handling either structured dicts or raw text)
+            def process_result(res, d_type):
+                if isinstance(res, dict) and res.get("is_structured"):
+                    # CNSS: fields are already extracted by cnss_zones
+                    return {"fields": res["fields"], "cleaned_text": ""}
+                else:
+                    # Facture/Ordonnance: parse raw text via NLP pipeline
+                    raw_text = res if isinstance(res, str) else res.get("text", "")
+                    return extract_entities(raw_text, doc_type=d_type)
+
+            e_o = process_result(res_o, "ordonnance")
+            e_f = process_result(res_f, "facture")
+            e_s = process_result(res_s, "feuille_cnss")
+
+            # 3. Anomaly and Verdict Calculation
             doc_anomalies = {
                 "ordonnance": apply_rules("ordonnance", e_o["fields"]),
                 "facture": apply_rules("facture", e_f["fields"]),
                 "feuille_cnss": apply_rules("feuille_cnss", e_s["fields"])
             }
 
-            # On croise les documents
             cross_anomalies = cross_check(e_o["fields"], e_f["fields"], e_s["fields"])
-
-            # On demande le verdict final
             verdict = evaluate_dossier(doc_anomalies, cross_anomalies)
-            # =======================================================
 
             return {
                 "ordonnance": {
-                    "raw": {"length": len(t_o), "preview": t_o[:2000]},
-                    "clean": {"length": len(e_o["cleaned_text"]), "preview": e_o["cleaned_text"][:2000]},
                     "fields": e_o["fields"],
+                    "raw_text": res_o,  # <--- Added this to see what OCR returned
                     "anomalies": doc_anomalies["ordonnance"]
                 },
                 "facture": {
-                    "raw": {"length": len(t_f), "preview": t_f[:2000]},
-                    "clean": {"length": len(e_f["cleaned_text"]), "preview": e_f["cleaned_text"][:2000]},
                     "fields": e_f["fields"],
+                    "raw_text": res_f,  # <--- Added this to see what OCR returned
                     "anomalies": doc_anomalies["facture"],
                 },
+                # In server.py, inside the return block for "feuille":
                 "feuille": {
-                    "raw": {"length": len(t_s), "preview": t_s[:2000]},
-                    "clean": {"length": len(e_s["cleaned_text"]), "preview": e_s["cleaned_text"][:2000]},
                     "fields": e_s["fields"],
+                    "raw_text": res_s.get("fields") if isinstance(res_s, dict) else res_s,
                     "anomalies": doc_anomalies["feuille_cnss"]
                 },
-                # =======================================================
-                # L'AJOUT DU VERDICT DANS LA RÉPONSE
-                # =======================================================
                 "cross_anomalies": cross_anomalies,
                 "verdict": verdict["decision"],
                 "score_confiance": verdict["score"],
@@ -190,7 +191,6 @@ def create_app() -> FastAPI:
             _safe_remove(o_path)
             _safe_remove(f_path)
             _safe_remove(s_path)
-
     return app
 
 

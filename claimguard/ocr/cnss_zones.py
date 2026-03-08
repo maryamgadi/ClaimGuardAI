@@ -166,52 +166,126 @@ def _extract_fees_amount(lines: List[str]) -> Optional[float]:
     vals.sort()
     return float(vals[-1])
 
-def extract_cnss_fields_from_image(ocr, image_bgr: np.ndarray) -> Dict[str, Any]:
-    """
-    Retourne dict: beneficiary_name, cin, fees_amount (si trouvés)
-    IMPORTANT: nécessite une image CNSS page entière.
-    """
-    img = image_bgr
-    if img is None or img.size == 0:
-        return {}
+def extract_cnss_fields_from_image(image_bgr: np.ndarray, ocr_engine) -> Dict[str, Any]:
+    # 1. Validation
+    if image_bgr is None or image_bgr.size == 0:
+        raise ValueError("Image provided to cnss_zones is empty.")
 
-    # Pré-traitement global (améliore cases)
-    cleaned = _to_gray_and_clean(img)
-    cleaned_bgr = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2BGR)
+    # 2. Zone Definitions
+    Z_BENEF = (0.449, 0.620, 0.476, 0.884)
+    Z_CIN   = (0.495, 0.642, 0.520, 0.742)
 
-    # ZONES (ratios) — ajustables selon ton rendu PyMuPDF
-    # Si ton rendu change (dpi), ratios restent stables.
-    Z_BENEF = (0.08, 0.38, 0.92, 0.55)  # zone "Bénéficiaire de soins" / "Nom et prénom"
-    Z_CIN   = (0.55, 0.52, 0.92, 0.62)  # zone "N°CIN"
-    Z_FEES  = (0.10, 0.30, 0.55, 0.40)  # zone "Montant des frais" (souvent à gauche)
+    # 3. Helper to ensure we return a string, not a list
+    def _force_string(ocr_output) -> str:
+        # If ocr_output is a list of strings, join them with a space
+        if isinstance(ocr_output, list):
+            return " ".join([str(x) for x in ocr_output]).strip()
+        return str(ocr_output or "").strip()
 
-    benef_img = _crop_rel(cleaned_bgr, Z_BENEF)
-    cin_img   = _crop_rel(cleaned_bgr, Z_CIN)
-    fees_img  = _crop_rel(cleaned_bgr, Z_FEES)
+    # 4. Extract segments
+    fields = {}
+    benef_raw = _ocr_lines(ocr_engine, _crop_rel(image_bgr, Z_BENEF))
+    cin_raw   = _ocr_lines(ocr_engine, _crop_rel(image_bgr, Z_CIN))
 
-    benef_lines = _ocr_lines(ocr, benef_img)
-    cin_lines   = _ocr_lines(ocr, cin_img)
-    fees_lines  = _ocr_lines(ocr, fees_img)
+    # 5. Assign as strings (FIXES the 'list' attribute error)
+    fields["beneficiary_name"] = _force_string(benef_raw)
+    fields["cin"] = _force_string(cin_raw)
 
-    out: Dict[str, Any] = {}
+    return fields
 
-    name = _best_name_candidate(benef_lines)
-    if name:
-        out["beneficiary_name"] = name
 
-    cin = _extract_cin(cin_lines + benef_lines)
-    if cin:
-        out["cin"] = cin
 
-    fees = _extract_fees_amount(fees_lines)
-    if fees is not None:
-        out["fees_amount"] = round(float(fees), 2)
+import fitz  # PyMuPDF
+import numpy as np
+import cv2
 
-    # debug utile si tu veux voir ce que l'OCR a lu
-    out["_debug"] = {
-        "benef_lines": benef_lines[:10],
-        "cin_lines": cin_lines[:10],
-        "fees_lines": fees_lines[:10],
-    }
 
-    return out
+def pdf_page_to_image(pdf_path, page_num=0, dpi=300):
+    doc = fitz.open(pdf_path)
+    page = doc.load_page(page_num)
+    pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72))
+
+    # Convert pixmap to numpy array
+    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+    # Convert RGBA to BGR for OpenCV
+    return cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+"""
+pdf_path = r"C:\ Users\HP\Downloads\fichier amo.pdf"
+img = pdf_page_to_image(pdf_path, page_num=0) # page_num is 0-indexed (0 is the first page)
+
+# 2. Save the image to your Downloads folder so you can see it
+cv2.imwrite(r"C:\ Users\HP\Downloads\temp_cnss_page.png", img)
+
+print("Image saved successfully to C:\ Users\HP\Downloads\ temp_cnss_page.png")
+
+pdf_path = r"C:\ Users\HP\Downloads\fichier amo.pdf"
+img = pdf_page_to_image(pdf_path, page_num=0) # page_num is 0-indexed (0 is the first page)
+
+# 2. Save the image to your Downloads folder so you can see it
+cv2.imwrite(r"C:\ Users\HP\Downloads\temp_cnss_page1.png", img)
+
+print("Image saved successfully to C:\ Users\HP\Downloads\ temp_cnss_page1.png")
+"""
+import cv2
+
+"""
+def calibrate_zone(image_path):
+    # 1. Load original image
+    img_original = cv2.imread(image_path)
+    orig_h, orig_w = img_original.shape[:2]
+
+    # 2. Resize for display (scale down to 1200px width for visibility)
+    display_width = 1200
+    scale = display_width / orig_w
+    display_h = int(orig_h * scale)
+    img_display = cv2.resize(img_original, (display_width, display_h))
+
+    # 3. Select ROI on the scaled image
+    # Note: selectROI returns (x, y, w, h) based on the image passed to it
+    roi = cv2.selectROI("Calibrate - Press ENTER to confirm", img_display, fromCenter=False, showCrosshair=True)
+    x, y, w, h = roi
+
+    cv2.destroyAllWindows()
+
+    # 4. Map coordinates back to original image size
+    # If the user pressed ESC (roi is 0,0,0,0), exit
+    if w == 0 or h == 0:
+        print("Selection cancelled.")
+        return
+
+    orig_x = int(x / scale)
+    orig_y = int(y / scale)
+    orig_w_roi = int(w / scale)
+    orig_h_roi = int(h / scale)
+
+    # 5. Calculate ratios
+    y_min, x_min = orig_y / orig_h, orig_x / orig_w
+    y_max, x_max = (orig_y + orig_h_roi) / orig_h, (orig_x + orig_w_roi) / orig_w
+
+    print(f"NEW ZONE: ({y_min:.3f}, {x_min:.3f}, {y_max:.3f}, {x_max:.3f})")
+    print(f"Paste this into your cnss_zones.py layout.")
+
+
+# Usage:
+calibrate_zone(r"C:\ Users\HP\Downloads\ temp_cnss_page.png")
+"""
+def extract_from_pdf(pdf_path, ocr_engine):
+    # 1. Render PDF to Image
+    img = pdf_page_to_image(pdf_path)
+
+    # 2. Call your existing zone logic
+    return extract_cnss_fields_from_image(img, ocr_engine)
+
+
+def _to_gray_and_clean(img: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+
+    # Augmente le contraste pour faire ressortir l'encre
+    gray = cv2.convertScaleAbs(gray, alpha=1.5, beta=0)
+
+    # Seuil adaptatif : rend le fond blanc et l'encre noire
+    cleaned = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY, 11, 2
+    )
+    return cleaned

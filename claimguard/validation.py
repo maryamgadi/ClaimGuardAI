@@ -325,3 +325,14 @@ def validate_case(extractions: List[Dict[str, Any]]) -> Dict[str, Any]:
         "metrics": metrics,
         "has_all_docs": bool(facture and cnss and ordonnance),
     }
+
+def clean_ocr_name(name: str) -> str:
+    if not name:
+        return ""
+    # 1. Fix common PaddleOCR character swaps in names
+    name = name.replace("1", "I").replace("0", "O").replace("5", "S").replace("8", "B")
+    # 2. Remove noise characters usually found at edges of OCR boxes
+    name = re.sub(r"[^A-ZÀ-ÿ\s\-]", "", name, flags=re.I)
+    # 3. Standardize spacing
+    name = re.sub(r"\s+", " ", name).strip()
+    return name.upper()
