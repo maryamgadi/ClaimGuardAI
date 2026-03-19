@@ -15,6 +15,11 @@ except Exception:
 
 from paddleocr import PaddleOCR
 from . import cnss_zones # Assumes this is in your package
+import google.generativeai as genai
+from pathlib import Path
+
+GEMINI_API_KEY = "AIzaSyBdZto59vHi62NLcZXGsn7V4eDjfVtn7UM"
+genai.configure(api_key=GEMINI_API_KEY)
 
 # ---------------------------
 # OCR engine (singleton)
@@ -197,3 +202,57 @@ def extract_text(path: str, doc_type: str = "generic", drop_score: float = 0.55)
     gray = preprocess_bgr(img)
     items = _run_ocr_lines(gray, drop_score=drop_score)
     return _join_lines([t for (t, s, y) in items])
+
+def extract_text_gemini(file_path: str, context_patient: str = "", context_doctor: str = "") -> str:
+    try:
+        # 1. On garde notre super Auto-Detect qui a fonctionné
+        model_to_use = None
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods and 'flash' in m.name:
+                model_to_use = m.name.replace('models/', '')
+                break
+        
+        if not model_to_use:
+            return ""
+            
+        model = genai.GenerativeModel(model_to_use)
+        
+        # 2. 🌟 LA MAGIE POUR LES PDF ET IMAGES 🌟
+        # On utilise l'API officielle de Google pour uploader le document proprement
+        print(f"⏳ Envoi du document ({file_path}) à Gemini...")
+        document_upload = genai.upload_file(path=file_path)
+        
+        prompt = f"""
+        Tu es un expert en lecture de feuilles de soins CNSS. Focalise-toi sur la partie centrale remplie manuellement par le médecin.
+
+        ⚠️ INSTRUCTIONS DE LOCALISATION :
+        1. Ignore l'identité de l'assuré en haut du document.
+        2. Cherche la section qui commence par "Bénéficiaire de soins".
+        3. Extrais le NOM et le PRÉNOM écrits à la main dans cette zone précise.
+        4. Si le nom est en Arabe, transcris-le impérativement en FRANÇAIS (Lettres Latines).
+        
+        AIDE AU DÉCHIFFRAGE (Contexte) :
+        - Patient : {context_patient}
+        - Médecin : {context_doctor}
+
+        FORMAT STRICT À RENVOYER :
+
+        Nom et prénom du bénéficiaire : [NOM DU PATIENT DANS LA ZONE BÉNÉFICIAIRE]
+        CIN : [NUMÉRO DE CIN]
+        Dr. [NOM DU MÉDECIN DANS LE CACHET]
+        Spécialiste en [SPÉCIALITÉ]
+        INPE : [Regarde le cachet. Si tu vois "INPE" ou un numéro même flou, écris PRESENT. Sinon laisse vide]
+        Montant des frais : [MONTANT TOTAL]
+        """
+        
+        # 3. On lance l'analyse
+        response = model.generate_content([prompt, document_upload])
+        
+        # 4. Bonne pratique de sécurité : on supprime le fichier des serveurs Google après lecture
+        genai.delete_file(document_upload.name)
+        
+        return response.text
+        
+    except Exception as e:
+        print(f"🚨 ERREUR CRITIQUE GEMINI : {str(e)}")
+        return ""

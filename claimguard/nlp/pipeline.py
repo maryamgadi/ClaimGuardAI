@@ -33,7 +33,7 @@ RE_TOTAL = re.compile(
 )
 
 RE_ICE = re.compile(r"\bICE\s*[:=]?\s*([0-9A-Z\&]{6,})\b", re.I)
-RE_INPE = re.compile(r"\bINPE\s*[:=]?\s*([0-9A-Z]{6,})\b", re.I)
+RE_INPE = re.compile(r"\bINPE\s*[:=]?\s*(PRESENT|[0-9A-Z]{4,})\b", re.I)
 
 RE_SPECIALTY = re.compile(
     # [a-zA-ZÀ-ÿ \-\,]+ permet de capturer toute la suite de mots sur la même ligne (espaces, tirets, virgules)

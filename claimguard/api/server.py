@@ -5,9 +5,9 @@ import tempfile
 from typing import Any, Dict
 from claimguard.rules.engine import apply_rules, cross_check, evaluate_dossier
 from claimguard.validation import validate_case as validate_claim_fn
-from claimguard.ocr.core import extract_text
+from claimguard.ocr.core import extract_text, extract_text_gemini
 from claimguard.nlp.pipeline import extract_entities
-
+from rapidfuzz import process, fuzz
 
 def _suffix(filename: str, default: str = ".bin") -> str:
     ext = os.path.splitext(filename or "")[1]
@@ -125,62 +125,62 @@ def create_app() -> FastAPI:
     # ---------- debug OCR (3 docs) ----------
     @app.post("/debug/claim-ocr")
     async def debug_claim_ocr(
-            ordonnance: UploadFile = File(...),
-            facture: UploadFile = File(...),
-            feuille: UploadFile = File(...),
-    ):
+        ordonnance: UploadFile = File(...),
+        facture: UploadFile = File(...),
+        feuille: UploadFile = File(...),
+        ):
         o_path = f_path = s_path = None
         try:
             o_path = await _save_upload_to_tmp(ordonnance)
             f_path = await _save_upload_to_tmp(facture)
             s_path = await _save_upload_to_tmp(feuille)
+            # 1. Lecture Ordonnance (Référence)
+            t_o = extract_text(o_path) or ""
+            e_o = extract_entities(t_o, "ordonnance")
+            nom_ref = e_o["fields"].get("patient_name", "Inconnu")
+            doc_ref = e_o["fields"].get("doctor_name", "Inconnu")
+            
+            # 2. Lecture Facture
+            t_f = extract_text(f_path) or ""
+            e_f = extract_entities(t_f, "facture")
+            
+            # 3. Lecture CNSS avec Gemini (Passage du contexte)
+            t_s = extract_text_gemini(s_path, context_patient=nom_ref, context_doctor=doc_ref)
+            e_s = extract_entities(t_s, "feuille_cnss")
 
-            # 1. Unified extraction
-            # We pass doc_type so core.py can handle CNSS as structured fields
-            res_o = extract_text(o_path, doc_type="ordonnance")
-            res_f = extract_text(f_path, doc_type="facture")
-            res_s = extract_text(s_path, doc_type="feuille_cnss")
+            # 🌟 NOUVEAU : Correction intelligente (Fuzzy Matching)
+            # On compare le nom trouvé par Gemini avec le nom de l'ordonnance
+            nom_gemini = e_s["fields"].get("beneficiary_name", "")
+            if nom_gemini and nom_ref != "Inconnu":
+                # Si la ressemblance est > 70%, on force le nom propre de l'ordonnance
+                if fuzz.ratio(nom_gemini.upper(), nom_ref.upper()) > 70:
+                    print(f"✅ Correction Patient : {nom_gemini} -> {nom_ref}")
+                    e_s["fields"]["beneficiary_name"] = nom_ref
 
-            # 2. Process results (handling either structured dicts or raw text)
-            def process_result(res, d_type):
-                if isinstance(res, dict) and res.get("is_structured"):
-                    # CNSS: fields are already extracted by cnss_zones
-                    return {"fields": res["fields"], "cleaned_text": ""}
-                else:
-                    # Facture/Ordonnance: parse raw text via NLP pipeline
-                    raw_text = res if isinstance(res, str) else res.get("text", "")
-                    return extract_entities(raw_text, doc_type=d_type)
-
-            e_o = process_result(res_o, "ordonnance")
-            e_f = process_result(res_f, "facture")
-            e_s = process_result(res_s, "feuille_cnss")
-
-            # 3. Anomaly and Verdict Calculation
+            # Pareil pour le médecin
+            doc_gemini = e_s["fields"].get("doctor_name", "")
+            if doc_gemini and doc_ref != "Inconnu":
+                if fuzz.ratio(doc_gemini.upper(), doc_ref.upper()) > 70:
+                    print(f"✅ Correction Médecin : {doc_gemini} -> {doc_ref}")
+                    e_s["fields"]["doctor_name"] = doc_ref
+                    
+            # 4. Vérification des anomalies avec les données corrigées
             doc_anomalies = {
                 "ordonnance": apply_rules("ordonnance", e_o["fields"]),
                 "facture": apply_rules("facture", e_f["fields"]),
                 "feuille_cnss": apply_rules("feuille_cnss", e_s["fields"])
             }
-
+        
             cross_anomalies = cross_check(e_o["fields"], e_f["fields"], e_s["fields"])
             verdict = evaluate_dossier(doc_anomalies, cross_anomalies)
-
             return {
-                "ordonnance": {
-                    "fields": e_o["fields"],
-                    "raw_text": res_o,  # <--- Added this to see what OCR returned
-                    "anomalies": doc_anomalies["ordonnance"]
-                },
-                "facture": {
-                    "fields": e_f["fields"],
-                    "raw_text": res_f,  # <--- Added this to see what OCR returned
-                    "anomalies": doc_anomalies["facture"],
-                },
-                # In server.py, inside the return block for "feuille":
+                
+                "ordonnance": {"fields": e_o["fields"], "anomalies": doc_anomalies["ordonnance"]},
+                "facture": {"fields": e_f["fields"], "anomalies": doc_anomalies["facture"]},
                 "feuille": {
-                    "fields": e_s["fields"],
-                    "raw_text": res_s.get("fields") if isinstance(res_s, dict) else res_s,
-                    "anomalies": doc_anomalies["feuille_cnss"]
+                    "raw_gemini": t_s, 
+                    "fields": e_s["fields"], 
+                     "anomalies": doc_anomalies["feuille_cnss"]
                 },
                 "cross_anomalies": cross_anomalies,
                 "verdict": verdict["decision"],

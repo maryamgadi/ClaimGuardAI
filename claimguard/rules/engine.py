@@ -74,11 +74,13 @@ def apply_rules(doc_type: str, fields: Dict) -> List[str]:
         specialite = fields.get("doctor_specialty")
         inpe = fields.get("doctor_inpe")
         
-        # Si on n'a trouvé ni l'INPE ni la spécialité, c'est probablement qu'il n'y a pas de cachet
         if not specialite and not inpe:
             anomalies.append(f"{doc_type}: Cachet du médecin introuvable (Spécialité et INPE manquants)")
+        
+        # 2. Si on a la spécialité mais pas d'INPE du tout
         elif not inpe:
-            # On peut aussi ajouter un simple avertissement si l'INPE manque mais qu'on a la spécialité
+            # On ne met l'anomalie que si c'est VRAIMENT vide. 
+            # Si Gemini a mis "PRESENT", cette condition ne sera pas remplie.
             anomalies.append(f"{doc_type}: Attention, numéro INPE introuvable dans le cachet")
 
     for f in req:
